@@ -18,7 +18,7 @@ fmtname(const char *path)
 }
 
 void
-find(const char *path, int force_rec)
+find(const char *path, const char *name, int force_rec)
 {
   char buf[512], *p, *path_fmt;
   int fd;
@@ -43,14 +43,15 @@ find(const char *path, int force_rec)
     return;
   }
 
+  path_fmt = fmtname(path);
   switch(st.type)
   {
   case T_FILE:
-    printf("%s\n", path);
+    if(!strcmp(path_fmt, name))
+      printf("%s\n", path);
     break;
 
   case T_DIR:
-    path_fmt = fmtname(path);
     if(!force_rec)
     {
       if(!strcmp(path_fmt, "."))
@@ -58,7 +59,8 @@ find(const char *path, int force_rec)
       if(!strcmp(path_fmt, ".."))
         break;
     }
-    printf("%s\n", path);
+    if(!strcmp(path_fmt, name))
+      printf("%s\n", path);
     strcpy(buf, path);
     len = strlen(buf);
     p = buf + len++;
@@ -85,7 +87,7 @@ find(const char *path, int force_rec)
         continue;
       }
       strcpy(p, de.name);
-      find(buf, 0);
+      find(buf, name, 0);
     }
     break;
   }
@@ -96,16 +98,13 @@ find(const char *path, int force_rec)
 int
 main(int argc, char *argv[])
 {
-  int i;
-
   argv0 = fmtname(argv[0]);
-  if(argc == 1)
-    find(".", 1);
-  else
+  if(argc != 3)
   {
-    for(i = 1; i < argc; ++i)
-      find(argv[i], 1);
+    fprintf(2, "usage: %s <dir> <name>\n", argv0);
+    exit(1);
   }
+  find(argv[1], argv[2], 1);
 
   exit(retval);
 }
