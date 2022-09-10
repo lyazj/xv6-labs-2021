@@ -668,3 +668,19 @@ trace(int mask)
   p->tracemask = mask;
   return 0;
 }
+
+int
+procnum(void)
+{
+  struct proc *p;
+  int num = 0;
+  
+  for(p = proc; p < &proc[NPROC]; ++p)
+  {
+    acquire(&p->lock);
+    num += p->state != UNUSED;
+    release(&p->lock);
+  }
+
+  return num;
+}

@@ -14,6 +14,8 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+static uint64 fpgc;  // free page counter
+
 struct run {
   struct run *next;
 };
@@ -27,6 +29,7 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  fpgc = 0;
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -59,6 +62,7 @@ kfree(void *pa)
   acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
+  ++fpgc;
   release(&kmem.lock);
 }
 
@@ -73,10 +77,26 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
+  {
     kmem.freelist = r->next;
+    --fpgc;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+// Count the number of free pages of the system.
+uint64
+kfreepgc(void)
+{
+  uint64 cnt;
+
+  acquire(&kmem.lock);
+  cnt = fpgc;
+  release(&kmem.lock);
+
+  return cnt;
 }
