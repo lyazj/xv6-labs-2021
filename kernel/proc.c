@@ -164,6 +164,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->tracemask = 0;
 }
 
 // Create a user page table for a given process,
@@ -669,6 +670,7 @@ trace(int mask)
   return 0;
 }
 
+// Count process other than UNUSED ones.
 int
 procnum(void)
 {
