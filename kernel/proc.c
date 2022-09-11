@@ -674,3 +674,28 @@ procdump(void)
     printf("\n");
   }
 }
+
+// Check if the n pages starting from va have been
+// accessed since the last check on each one.
+// Return 0 on success, -1 on failure.
+int
+pgaccess(uint64 va, int n, uint64 buf)
+{
+  struct proc *p;
+  pagetable_t pagetable;
+  int access, i, v = 0;
+
+  if(n < 0 || n > sizeof(int) << 3)
+    return -1;
+  p = myproc();
+  pagetable = p->pagetable;
+  for(i = 0; i < n; ++i)
+  {
+    access = vmaccess(pagetable, va);
+    if(access < 0)
+      return -1;
+    v |= access << i;
+    va += PGSIZE;
+  }
+  return copyout(pagetable, buf, (char *)&v, sizeof v);
+}

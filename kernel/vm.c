@@ -433,7 +433,9 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
 
-void vmprint(pagetable_t pagetable)
+// Print the page table.
+void
+vmprint(pagetable_t pagetable)
 {
   pte_t *p0, *p1, *p2, e0, e1, e2, *ph0, *ph1, *ph2;
 
@@ -466,4 +468,20 @@ void vmprint(pagetable_t pagetable)
       }
     }
   }
+}
+
+// Check if the pages designated by va has been
+// accessed since the last check on it.
+// Return 0/1 on success, -1 on failure.
+int
+vmaccess(pagetable_t pagetable, uint64 va)
+{
+  int accessed;
+  pte_t *pte = walk(pagetable, va, 0);
+
+  if(!pte)  // unmapped
+    return -1;
+  accessed = !!(*pte & PTE_A);
+  *pte &= ~PTE_A;
+  return accessed;
 }
