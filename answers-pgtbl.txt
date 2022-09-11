@@ -36,6 +36,8 @@ A2: I also checked the output of the two commands to get the answer:
                       CONTENTS, READONLY, DEBUGGING, OCTETS
     ... (more output less interesting omitted)
 
+**************************************** MY RESULT GOES BELOW ****************************************
+
     page table 0x0000000087f6e000
      ..0: pte 0x0000000021fda801 pa 0x0000000087f6a000
      .. ..0: pte 0x0000000021fda401 pa 0x0000000087f69000
@@ -47,3 +49,53 @@ A2: I also checked the output of the two commands to get the answer:
      .. .. ..509: pte 0x0000000021fdd813 pa 0x0000000087f76000    # 0x7fffffd000: usyscall
      .. .. ..510: pte 0x0000000021fddc07 pa 0x0000000087f77000    # 0x7fffffe000: trapframe
      .. .. ..511: pte 0x0000000020001c0b pa 0x0000000080007000    # 0x7ffffff000: trampoline
+
+**************************************** MY RESULT GOES ABOVE ****************************************
+
+NOTE: I also use GDB to trace each physical address allocated. To achieve this, I run GDB with .gdbinit of xv6 enabled, inject a breakpoint before kalloc, continue the execution, and add a breakpoint before kfree on the first interrupt at kalloc. Then I know that:
+
+    0x87fff000: the root page table of the kernel
+    0x87ffe000: #0 second-level page table of the kernel
+    0x87ffd000: #0#128 third-level page table of the kernel       # 0x0010000000: uart registers (1 page)
+    0x87ffc000: #0#96 third-level page table of the kernel        # 0x000c000000: virtio mmio disk interface (512 pages)
+    0x87ffb000: #0#97 third-level page table of the kernel        # 0x000c200000: virtio mmio disk interface
+    0x87ffa000: #2 second-level page table of the kernel
+    0x87ff9000: #2#0 third-level page table of the kernel         # 0x0080000000: kernel text (8 pages)
+                                                                  # 0x0080008000: kernel data and PRAM free pages (32760 pages)
+    0x87ff8000: #2#1 third-level page table of the kernel         # 0x0080200000: PRAM free pages
+    0x87ff7000: #2#2 third-level page table of the kernel         # 0x0080400000: PRAM free pages
+    ...
+    0x87fba000: #2#63 third-level page table of the kernel        # 0x0087e00000: PRAM free pages
+    0x87fb9000: #255 second-level page table of the kernel
+    0x87fb8000: #255#511 third-level page table of the kernel     # 0x3ffffff000: trampoline (1 page)
+    0x87fb7000: kernel stack of process 0
+    0x87fb6000: kernel stack of process 1
+    ...
+    0x87f78000: kernel stack of process 63
+   *0x87f77000: trapframe of process 0
+   *0x87f76000: usyscall of process 0
+    0x87f75000: the root page table of process 0
+    0x87f74000: #255 second-level page table of process 0
+    0x87f73000: #255#511 third-level page table of process 0      # 0x3ffffff000: trampoline (1 page)
+    0x87f72000: mem of process 0
+    0x87f71000: #0 second-level page table of process 0
+    0x87f70000: #0#0 third-level page table of process 0          # 0x0000000000: mem (1 page)
+    0x87f6f000: argv[0] [e]                                       # 0x0087f6f000: "/init" (1 page)
+   *0x87f6e000: the root page table of process 0 [e]
+   *0x87f6d000: #255 second-level page table of process 0 [e]
+   *0x87f6c000: #255#511 third-level page table of process 0 [e]  # 0x3ffffff000: trampoline (1 page)
+   *0x87f6b000: mem of process 0 [e]
+   *0x87f6a000: #0 second-level page table of process 0 [e]
+   *0x87f69000: #0#0 third-level page table of process 0          # 0x0000000000: mem (1 page)
+   *0x87f68000: guard page of process 0 [e]
+   *0x87f67000: stack of process 0 [e]
+    0x87f72000: free (mem of process 0)
+    0x87f70000: free (#0#0 third-level page table of process 0)
+    0x87f71000: free (#0 third-level page table of process 0)
+    0x87f73000: free (#255#511 third-level page table of process 0)
+    0x87f74000: free (#255 second-level page table of process 0)
+    0x87f75000: free (the root page table of process 0)
+    0x87f6f000: free (argv[0] [e])
+
+*   items relevant to the output of vmprint
+[e] items created by procedure exec
