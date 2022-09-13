@@ -122,6 +122,7 @@ panic(char *s)
   printf(s);
   printf("\n");
   panicked = 1; // freeze uart output from other CPUs
+  backtrace();
   for(;;)
     ;
 }
@@ -131,4 +132,31 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+struct fh {
+  uint64 fp;
+  uint64 ra;
+};
+
+static inline struct fh *
+fp2fhp(uint64 fp)
+{
+  return (void *)(fp - 16);
+}
+
+void
+backtrace(void)
+{
+  uint64 fp;
+  struct fh *fhp;
+
+  printf("backtrace:\n");
+  fp = r_fp();
+  while(fp & (PGSIZE - 1))
+  {
+    fhp = fp2fhp(fp);
+    printf("%p\n", fhp->ra);
+    fp = fhp->fp;
+  }
 }
