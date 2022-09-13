@@ -1,0 +1,42 @@
+Q1: Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+
+A1: a0, a1, ..., a7. a2.
+
+--------------------------------------------------------------------------------
+
+Q2: Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+
+A2: Both inlined. The call to function f with the argument assigned 8 produces 11, which is exactly the value of the second argument to call printf before adding 1 to it. As function f just forwards the input and output to or from function g, this call is also directly eliminated by inlining.
+
+--------------------------------------------------------------------------------
+
+Q3: At what address is the function printf located? 
+
+A3: 0x628.
+
+--------------------------------------------------------------------------------
+
+Q4: What value is in the register ra just after the jalr to printf in main? 
+
+A4: 0x38.
+
+--------------------------------------------------------------------------------
+
+Q5: Run the following code.
+
+	unsigned int i = 0x00646c72;
+	printf("H%x Wo%s", 57616, &i);
+
+What is the output? Here's an ASCII table that maps bytes to characters.
+
+The output depends on that fact that the RISC-V is little-endian. If the RISC-V were instead big-endian what would you set i to in order to yield the same output? Would you need to change 57616 to a different value?
+
+A5: HE110 World. 0x726c6400. No need.
+
+--------------------------------------------------------------------------------
+
+Q6: In the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen?
+
+	printf("x=%d y=%d", 3);
+      
+A6: Any integer from -2147483648 to +2147483647 is possible. The function printf is declared to be variadic and procedure vprintf (invoked by printf with a va_list as one of the arguments) extracts the value originated from register a2 just before the call to printf, which should contain the third argument of the call but is unexpectedly omitted leaving over a junk value.
