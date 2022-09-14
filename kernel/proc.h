@@ -105,4 +105,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int sigalarm_ticks;          // Tick counter for SIGALRAM period
+  int sigalarm_interval;       // Interval of sending SIGALARM signal
+  uint64 sigalarm_handler;     // SIGALARM handler address in user space
+  int sigsaved;                // True if trapframe saved to sigframe
+  struct trapframe sigframe;   // Save trapframe before invoking handler
 };

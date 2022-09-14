@@ -164,6 +164,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->sigalarm_ticks = 0;
+  p->sigalarm_interval = 0;
+  p->sigalarm_handler = 0;
+  p->sigsaved = 0;
 }
 
 // Create a user page table for a given process,
@@ -653,4 +657,49 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int sigalarm(int ticks, uint64 handler)
+{
+  struct proc *p = myproc();
+
+  p->sigalarm_ticks = 0;
+  p->sigalarm_interval = ticks;
+  p->sigalarm_handler = handler;
+  return 0;
+}
+
+int sigalarm_trigger(void)
+{
+  struct proc *p = myproc();
+
+  if(p->sigalarm_interval)
+  {
+    if(p->sigalarm_interval < 0)
+      panic("negative sigalarm_interval");
+    if(p->sigalarm_ticks < 0)
+      panic("negative sigalarm_ticks");
+    if(p->sigalarm_ticks >= p->sigalarm_interval)
+      panic("sigalarm_ticks exceeded");
+    if(++p->sigalarm_ticks == p->sigalarm_interval)
+    {
+      p->sigalarm_ticks = 0;
+      if(p->sigsaved)
+        return 0;
+      p->sigsaved = 1;
+      p->sigframe = *p->trapframe;
+      p->trapframe->epc = p->sigalarm_handler;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int sigreturn(void)
+{
+  struct proc *p = myproc();
+
+  *p->trapframe = p->sigframe;
+  p->sigsaved = 0;
+  return 0;
 }

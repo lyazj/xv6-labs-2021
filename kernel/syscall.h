@@ -20,3 +20,7 @@
 #define SYS_link   19
 #define SYS_mkdir  20
 #define SYS_close  21
+
+// User added system calls
+#define SYS_sigalarm  65
+#define SYS_sigreturn 66
