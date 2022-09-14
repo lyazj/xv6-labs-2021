@@ -5,11 +5,25 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
 
 /*
  * the kernel's page table.
  */
 pagetable_t kernel_pagetable;
+struct {
+  struct spinlock lock;
+  uint64 ref[(PHYSTOP - KERNBASE) >> 12];
+} cow;
+
+static uint64 *
+cowref(uint64 pa)
+{
+  uint64 index = (pa - KERNBASE) >> 12;
+  if(index >= NELEM(cow.ref))
+    panic("cowref: index out of range");
+  return &cow.ref[index];
+}
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
@@ -53,6 +67,7 @@ kvmmake(void)
 void
 kvminit(void)
 {
+  initlock(&cow.lock, "cow");
   kernel_pagetable = kvmmake();
 }
 
@@ -171,6 +186,8 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
+  if(do_free)
+    acquire(&cow.lock);
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
@@ -180,10 +197,26 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+      if(*pte & PTE_COW){
+        uint64 *ref = cowref(pa);
+        if(*ref)
+        {
+          // printf("uvmunmap: ref(%p) <- %d\n", pa, *ref - 1);
+          --*ref;
+        }
+        else
+        {
+          // printf("uvmunmap: kfree(%p)\n", pa);
+          kfree((void*)pa);
+        }
+      }
+      else
+        kfree((void*)pa);
     }
     *pte = 0;
   }
+  if(do_free)
+    release(&cow.lock);
 }
 
 // create an empty user page table.
@@ -291,40 +324,59 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
+// Copy a page table element.
+// pte must not be of trapframe or trampoline.
+// The caller must hold cow.lock.
+static pte_t
+ptecopy(pte_t *pte)
+{
+  uint64 pa = PTE2PA(*pte);
+  uint64 *ref = cowref(pa);
+
+  if(*pte & PTE_COW)
+    ++*ref;  // it's OK if *ref == 0
+  else
+  {
+    if(*ref)
+      panic("ptecopy: cow ref with no PTE_COW");
+    if(*pte & PTE_COW_W)
+      panic("ptecopy: PTE_COW_W with no PTE_COW");
+    ++*ref;
+    *pte = (*pte | PTE_COW | ((*pte & PTE_W) << 7)) & ~PTE_W;
+  }
+  // printf("ptecopy: ref(%p) <- %d\n", pa, *ref);
+  return *pte;
+}
+
 // Given a parent process's page table, copy
 // its memory into a child's page table.
-// Copies both the page table and the
-// physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
-  pte_t *pte;
-  uint64 pa, i;
-  uint flags;
-  char *mem;
+  pte_t *pte, *pte_new;
+  uint64 va;
 
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
+  acquire(&cow.lock);
+  for(va = 0; va < sz; va += PGSIZE)
+  {
+    pte = walk(old, va, 0);
+    if(pte == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+    pte_new = walk(new, va, 1);
+    if(pte_new == 0)
+    {
+      uvmunmap(new, va, va / PGSIZE, 1);
+      release(&cow.lock);
+      return -1;
     }
+    *pte_new = ptecopy(pte);
   }
+  release(&cow.lock);
   return 0;
-
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
 }
 
 // mark a PTE invalid for user access.
@@ -346,13 +398,19 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
+  pte_t *pte;
   uint64 n, va0, pa0;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    pte = walk(pagetable, va0, 0);
+    if(pte == 0 || (*pte & PTE_V) == 0)
       return -1;
+    pa0 = PTE2PA(*pte);
+    if((*pte & PTE_W) == 0)
+      if(cow_trigger(pagetable, va0) <= 0)
+        return -1;
+    pa0 = PTE2PA(*pte);
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -430,5 +488,83 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
+  }
+}
+
+// Call the trigger if scause == 15 with va = stval.
+// Return 0 if COW access denied.
+// Return 1 if COW done.
+// Return -1 with no memory.
+int cow_trigger(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte = walk(pagetable, va, 0);
+  uint64 pa, pa_new, *ref;
+
+  if(pte == 0)  // unmapped
+    return 0;
+  if((*pte & PTE_V) == 0)  // unmapped
+    return 0;
+  if((*pte & PTE_U) == 0)  // supervisor
+    return 0;
+  if(*pte & PTE_W)  // writable
+    panic("cow_trigger: writable");
+  if((*pte & PTE_COW_W) == 0)  // no write access
+    return 0;
+  if((*pte & PTE_COW) == 0)  // not a COW
+    panic("cow_trigger: PTE_COW_W with no PTE_COW");
+  pa = PTE2PA(*pte);
+  ref = cowref(pa);
+  acquire(&cow.lock);
+  if(*ref == 0)  // COW freed
+  {
+    release(&cow.lock);
+    *pte = (PTE_FLAGS(*pte) & ~(PTE_COW | PTE_COW_W)) | PTE_W | PA2PTE(pa);
+    return 1;
+  }
+  --*ref;
+  // printf("cow_trigger: ref(%p) <- %d\n", pa, *ref);
+  release(&cow.lock);
+  pa_new = (uint64)kalloc();
+  if(pa_new == 0)  // run out of memory
+    return -1;
+  memmove((void *)pa_new, (void *)pa, PGSIZE);
+  *pte = (PTE_FLAGS(*pte) & ~(PTE_COW | PTE_COW_W)) | PTE_W | PA2PTE(pa_new);
+  return 1;
+}
+
+// Print the page table.
+void
+vmprint(pagetable_t pagetable)
+{
+  pte_t *p0, *p1, *p2, e0, e1, e2, *ph0, *ph1, *ph2;
+
+  printf("page table %p\n", pagetable);
+  if(!pagetable)
+    return;
+  for(p0 = pagetable; p0 < &pagetable[512]; ++p0)
+  {
+    e0 = *p0;
+    if(!(PTE_V & e0))
+      continue;
+    ph0 = (pte_t *)PTE2PA(e0);
+    printf(" ..%d: pte %p pa %p flags %p\n", p0 - pagetable, e0, ph0, PTE_FLAGS(e0));
+
+    for(p1 = ph0; p1 < &ph0[512]; ++p1)
+    {
+      e1 = *p1;
+      if(!(PTE_V & e1))
+        continue;
+      ph1 = (pte_t *)PTE2PA(e1);
+      printf(" .. ..%d: pte %p pa %p flags %p\n", p1 - ph0, e1, ph1, PTE_FLAGS(e1));
+
+      for(p2 = ph1; p2 < &ph1[512]; ++p2)
+      {
+        e2 = *p2;
+        if(!(PTE_V & e2))
+          continue;
+        ph2 = (pte_t *)PTE2PA(e2);
+        printf(" .. .. ..%d: pte %p pa %p flags %p\n", p2 - ph1, e2, ph2, PTE_FLAGS(e2));
+      }
+    }
   }
 }

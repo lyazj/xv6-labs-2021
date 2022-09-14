@@ -50,7 +50,21 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if(r_scause() == 15){
+    // store page fault
+
+    uint64 addr = r_stval();
+    int r = cow_trigger(p->pagetable, addr);
+
+    if(r == 0)
+      goto L_usertrap_unexpected;
+    if(r < 0)
+    {
+      printf("usertrap(): run out of memory pid=%d\n", p->pid);
+      p->killed = 1;
+    }
+  }
+  else if(r_scause() == 8){
     // system call
 
     if(p->killed)
@@ -68,6 +82,7 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
+L_usertrap_unexpected:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
