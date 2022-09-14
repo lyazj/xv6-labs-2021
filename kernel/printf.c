@@ -142,7 +142,8 @@ struct fh {
 static inline struct fh *
 fp2fhp(uint64 fp)
 {
-  return (void *)(fp - 16);
+  struct fh *fhe = (struct fh *)fp;
+  return &fhe[-1];
 }
 
 void
