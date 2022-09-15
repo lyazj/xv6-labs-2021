@@ -9,15 +9,22 @@
 #include "riscv.h"
 #include "defs.h"
 
-void freerange(void *pa_start, void *pa_end);
-
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
+
+#define HEAPBEGIN (PGROUNDUP((uint64)end))
+#define HEAPEND   (PGROUNDDOWN((uint64)PHYSTOP))
+
+/* static */
+uint64 ref[(PHYSTOP - KERNBASE) / PGSIZE];
+
+#define HEAPREF(pa) ref[((uint64)(pa) - HEAPBEGIN) / PGSIZE]
 
 struct run {
   struct run *next;
 };
 
+/* static */
 struct {
   struct spinlock lock;
   struct run *freelist;
@@ -26,37 +33,41 @@ struct {
 void
 kinit()
 {
+  struct run *r = (struct run *)HEAPBEGIN;
+  kmem.freelist = r;
+  while(r != (struct run *)(HEAPEND - PGSIZE))
+    r = r->next = (struct run *)((uint64)r + PGSIZE);
+  r->next = 0;
   initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
 }
 
-void
-freerange(void *pa_start, void *pa_end)
-{
-  char *p;
-  p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
-    kfree(p);
-}
-
-// Free the page of physical memory pointed at by v,
+// Free the page of physical memory pointed at by pa,
 // which normally should have been returned by a
-// call to kalloc().  (The exception is when
-// initializing the allocator; see kinit above.)
+// call to kalloc().
 void
 kfree(void *pa)
 {
   struct run *r;
 
-  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
-    panic("kfree");
+  if((uint64)pa & (PGSIZE - 1))
+    panic("kfree: align");
+  if((uint64)pa < HEAPBEGIN)
+    panic("kfree: below the bound");
+  if((uint64)pa >= HEAPEND)
+    panic("kfree: above the bound");
+
+  acquire(&kmem.lock);
+  if(HEAPREF(pa) == 0)
+    panic("kfree: double free");
+  if(--HEAPREF(pa))
+  {
+    release(&kmem.lock);
+    return;
+  }
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
-
   r = (struct run*)pa;
-
-  acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -73,10 +84,59 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
+  {
+    if(HEAPREF(r)++)
+      panic("kalloc: double alloc");
     kmem.freelist = r->next;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+// Share one 4096-byte page of physical memory.
+// Returns the physical address.
+void *
+kshare(void *pa)
+{
+  if((uint64)pa & (PGSIZE - 1))
+    panic("kshare: align");
+  if((uint64)pa < HEAPBEGIN)
+    panic("kshare: below the bound");
+  if((uint64)pa >= HEAPEND)
+    panic("kshare: above the bound");
+
+  acquire(&kmem.lock);
+  if(HEAPREF(pa)++ == 0)
+    panic("kshare: freed");
+  release(&kmem.lock);
+  return pa;
+}
+
+// Duplicate one 4096-byte page of physical memory.
+// Returns the duplication on sucess.
+// Returns 0 if kalloc() fails.
+void *
+kdup(void *pa)
+{
+  void *pa_new;
+
+  if((uint64)pa & (PGSIZE - 1))
+    panic("kdup: align");
+  if((uint64)pa < HEAPBEGIN)
+    panic("kdup: below the bound");
+  if((uint64)pa >= HEAPEND)
+    panic("kdup: above the bound");
+
+  pa_new = kalloc();
+  if(pa_new == 0)
+    return 0;
+  acquire(&kmem.lock);
+  if(HEAPREF(pa) == 0)
+    panic("kdup: freed");
+  memmove(pa_new, pa, PGSIZE);
+  release(&kmem.lock);
+  return pa_new;
 }
