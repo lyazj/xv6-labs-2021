@@ -50,7 +50,40 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if(r_scause() == SCAUSE_SPF){
+    // store page fault
+    uint64 va = r_stval();
+    void *pa, *pa_new;
+    pte_t *pte, ptev;
+
+    if(va >= MAXVA)
+      goto L_UNEXPECTED_SCAUSE;
+    pte = walk(p->pagetable, va, 0);
+    if(pte == 0)
+      goto L_UNEXPECTED_SCAUSE;
+    ptev = *pte;
+    if((ptev & PTE_V) == 0)
+      goto L_UNEXPECTED_SCAUSE;
+    if((ptev & PTE_U) == 0)
+      goto L_UNEXPECTED_SCAUSE;
+    if((ptev & PTE_W) != 0)
+      panic("SPF: user writable");
+    if((ptev & PTE_C) == 0)
+      goto L_UNEXPECTED_SCAUSE;
+    pa = (void *)PTE2PA(ptev);
+    pa_new = kdup(pa);
+    if(pa_new == 0){
+      printf("usertrap(): run out of memory pid=%d\n", p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    } else{
+      kfree(pa);
+      ptev &= ~PTE_C;
+      ptev |= PTE_W;
+      ptev = PTE_FLAGS(ptev) | PA2PTE((uint64)pa_new);
+      *pte = ptev;
+    }
+  } else if(r_scause() == SCAUSE_ECU){
     // system call
 
     if(p->killed)
@@ -68,6 +101,7 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
+L_UNEXPECTED_SCAUSE:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

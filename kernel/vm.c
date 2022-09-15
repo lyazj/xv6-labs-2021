@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -291,40 +293,41 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
-// Given a parent process's page table, copy
-// its memory into a child's page table.
-// Copies both the page table and the
-// physical memory.
-// returns 0 on success, -1 on failure.
-// frees any allocated pages on failure.
+// Duplicate the parent process's page table,
+// for a to-be-created child.
+// All pages are shared, with COW enabled.
+// Returns 0 on success, -1 on failure.
+// Frees any allocated pages on failure.
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
-  pte_t *pte;
-  uint64 pa, i;
-  uint flags;
-  char *mem;
+  pte_t *pte, *pte_new, ptev;
+  uint64 va;
 
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
+  for(va = 0; va < sz; va += PGSIZE)
+  {
+    pte = walk(old, va, 0);
+    if(pte == 0)
       panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
+    ptev = *pte;
+    if((ptev & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+    pte_new = walk(new, va, 1);
+    if(pte_new == 0)
+    {
+      uvmunmap(new, 0, va / PGSIZE, 1);
+      return -1;
     }
+    kshare((void *)PTE2PA(ptev));
+    if(ptev & PTE_W)
+    {
+      ptev &= ~PTE_W;
+      ptev |= PTE_C;
+      *pte = ptev;
+    }
+    *pte_new = ptev;
   }
   return 0;
-
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
 }
 
 // mark a PTE invalid for user access.
@@ -346,13 +349,33 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
+  uint64 n, va0, pa0, pa0_new;
+  pte_t *pte, ptev;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    pte = walk(pagetable, va0, 0);
+    ptev = *pte;
+    if((ptev & PTE_W) == 0){
+      if((ptev & PTE_C) == 0)
+        return -1;
+      pa0_new = (uint64)kdup((void *)pa0);
+      if(pa0_new == 0){
+        printf("copyout(): run out of memory pid=%d\n", myproc()->pid);
+        myproc()->killed = 1;
+        return -1;
+      } else{
+        kfree((void *)pa0);
+        pa0 = pa0_new;
+        ptev &= ~PTE_C;
+        ptev |= PTE_W;
+        ptev = PTE_FLAGS(ptev) | PA2PTE((uint64)pa0_new);
+        *pte = ptev;
+      }
+    }
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
