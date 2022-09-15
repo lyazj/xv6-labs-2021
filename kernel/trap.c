@@ -53,7 +53,7 @@ usertrap(void)
   if(r_scause() == SCAUSE_SPF){
     // store page fault
     uint64 va = r_stval();
-    void *pa, *pa_new;
+    void *pa;
     pte_t *pte, ptev;
 
     if(va >= MAXVA)
@@ -71,16 +71,15 @@ usertrap(void)
     if((ptev & PTE_C) == 0)
       goto L_UNEXPECTED_SCAUSE;
     pa = (void *)PTE2PA(ptev);
-    pa_new = kdup(pa);
-    if(pa_new == 0){
+    pa = kmove(pa);
+    if(pa == 0){
       printf("usertrap(): run out of memory pid=%d\n", p->pid);
       printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
       p->killed = 1;
     } else{
-      kfree(pa);
       ptev &= ~PTE_C;
       ptev |= PTE_W;
-      ptev = PTE_FLAGS(ptev) | PA2PTE((uint64)pa_new);
+      ptev = PTE_FLAGS(ptev) | PA2PTE((uint64)pa);
       *pte = ptev;
     }
   } else if(r_scause() == SCAUSE_ECU){

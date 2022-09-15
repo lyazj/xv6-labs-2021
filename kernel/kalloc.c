@@ -140,3 +140,42 @@ kdup(void *pa)
   release(&kmem.lock);
   return pa_new;
 }
+
+// Duplicate one 4096-byte page of physical memory,
+// and kfree(pa) on success.
+// Returns the duplication on sucess.
+// Returns 0 if kalloc() fails, with pa untouched.
+void *
+kmove(void *pa)
+{
+  struct run *r;
+
+  if((uint64)pa & (PGSIZE - 1))
+    panic("kmove: align");
+  if((uint64)pa < HEAPBEGIN)
+    panic("kmove: below the bound");
+  if((uint64)pa >= HEAPEND)
+    panic("kmove: above the bound");
+
+  acquire(&kmem.lock);
+  if(HEAPREF(pa) == 0)
+    panic("kmove: freed");
+  if(HEAPREF(pa) == 1)
+  {
+    release(&kmem.lock);
+    return pa;
+  }
+  r = kmem.freelist;
+  if(r == 0)
+  {
+    release(&kmem.lock);
+    return 0;
+  }
+  if(HEAPREF(r)++)
+    panic("kmove: double alloc");
+  kmem.freelist = r->next;
+  --HEAPREF(pa);
+  memmove((void *)r, pa, PGSIZE);
+  release(&kmem.lock);
+  return (void *)r;
+}

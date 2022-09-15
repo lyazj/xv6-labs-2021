@@ -65,6 +65,7 @@ void            kfree(void *);
 void            kinit(void);
 void*           kshare(void *);
 void*           kdup(void *);
+void*           kmove(void *);
 
 // log.c
 void            initlog(int, struct superblock*);

@@ -349,7 +349,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0, pa0_new;
+  uint64 n, va0, pa0;
   pte_t *pte, ptev;
 
   while(len > 0){
@@ -362,17 +362,15 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     if((ptev & PTE_W) == 0){
       if((ptev & PTE_C) == 0)
         return -1;
-      pa0_new = (uint64)kdup((void *)pa0);
-      if(pa0_new == 0){
+      pa0 = (uint64)kmove((void *)pa0);
+      if(pa0 == 0){
         printf("copyout(): run out of memory pid=%d\n", myproc()->pid);
         myproc()->killed = 1;
         return -1;
       } else{
-        kfree((void *)pa0);
-        pa0 = pa0_new;
         ptev &= ~PTE_C;
         ptev |= PTE_W;
-        ptev = PTE_FLAGS(ptev) | PA2PTE((uint64)pa0_new);
+        ptev = PTE_FLAGS(ptev) | PA2PTE((uint64)pa0);
         *pte = ptev;
       }
     }
