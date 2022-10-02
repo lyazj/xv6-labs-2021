@@ -4,8 +4,34 @@
          * save the old thread's registers,
          * restore the new thread's registers.
          */
-
-	.globl thread_switch
+	.globl	thread_switch
 thread_switch:
-	/* YOUR CODE HERE */
-	ret    /* return to ra */
+	sd	ra, 0x00(a0)
+	sd	sp, 0x08(a0)
+	sd	fp, 0x10(a0)
+	sd	s1, 0x18(a0)
+	sd	s2, 0x20(a0)
+	sd	s3, 0x28(a0)
+	sd	s4, 0x30(a0)
+	sd	s5, 0x38(a0)
+	sd	s6, 0x40(a0)
+	sd	s7, 0x48(a0)
+	sd	s8, 0x50(a0)
+	sd	s9, 0x58(a0)
+	sd	s10, 0x60(a0)
+	sd	s11, 0x68(a0)
+	ld	ra, 0x00(a1)
+	ld	sp, 0x08(a1)
+	ld	fp, 0x10(a1)
+	ld	s1, 0x18(a1)
+	ld	s2, 0x20(a1)
+	ld	s3, 0x28(a1)
+	ld	s4, 0x30(a1)
+	ld	s5, 0x38(a1)
+	ld	s6, 0x40(a1)
+	ld	s7, 0x48(a1)
+	ld	s8, 0x50(a1)
+	ld	s9, 0x58(a1)
+	ld	s10, 0x60(a1)
+	ld	s11, 0x68(a1)
+	ret
