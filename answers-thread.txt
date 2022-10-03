@@ -27,3 +27,38 @@ Check the file 'uthread.asm' to get a totally different result:
   44:   f3080813                addi    a6,a6,-208 # 8f70 <base>
 
 Then things are clear that the breakpoint was hit while the kernel executing its startup codes just at the breakpoint address. Things originate from the shared virtual address space between the kernel and user programs and among all user programs. However, it depends on the fact that the kernel came to hit the point before uthread, which may not be true for another version of kernel. So the breakpoint may or may not be triggered before running uthread.
+
+Q3: Why are there missing keys with 2 threads, but not with 1 thread? Identify a sequence of events with 2 threads that can lead to a key being missing.
+
+A3: Everything is done sequentially with 1 thread, however, concurrently with 2. There's a dangerous gap between a thread finds a slot to insert a key-value pair and it finishes the inserting work. Specifically, here it is:
+
+
+static 
+void put(int key, int value)
+{
+  int i = key % NBUCKET;
+
+  // is the key already present?
+  struct entry *e = 0;
+  for (e = table[i]; e != 0; e = e->next) {
+    if (e->key == key)
+      break;
+  }
+  if(e){
+    // update the existing key.
+    e->value = value;
+  } else {
+    // the new is new.
+    insert(key, value, &table[i], table[i]);
+  }
+
+}
+
+Suppose that a calling thread of put just ended its for-loop finding nothing corresponding to key so that now e equals 0. However, just before it makes a call to insert or just before insert completes updating works for table[i], another thread happens to do another job on table[i] in put and just got e == 0 which terminated the for-loop. Then the two threads will both try to update &table[i] to their own newly allocated and filled entries, one of which will definitely gets lost from the race. A suitable sequence which triggers this situation could be:
+
+thread 0:
+    condition e == 0 just terminated the for clause in the call to put(100, 0)
+thread 1:
+    condition e == 0 just terminated the for clause in the call to put(105, 0)
+
+at the same time, with schematic keys 100 and 105 (maybe another ones in real life) generated from the random engine and NBUCKET == 5 in the source code.
