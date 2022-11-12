@@ -25,7 +25,7 @@
 
 #include "proc.h"  // debug
 
-#define NBUCKET 17U
+#define NBUCKET 31U
 
 static uint
 hash_blockno(uint blockno)
@@ -72,8 +72,8 @@ binit(void)
 static struct buf*
 bget(uint dev, uint blockno)
 {
-  int h = hash_blockno(blockno), h0;
-  struct buf *b;
+  int h = hash_blockno(blockno), h0, hv = 1 << 20;
+  struct buf *b, *v = 0;
 
   acquire(&bcache.bucket[h].lock);
 
@@ -87,17 +87,6 @@ bget(uint dev, uint blockno)
       return b;
     }
   }
-
-  // Not cached.
-  // Recycle the least recently used (LRU) unused buffer.
-  b = bcache.bucket[h].head.prev;
-  for(; b != &bcache.bucket[h].head; b = b->prev)
-    if(b->refcnt == 0)
-    {
-      b->prev->next = b->next;
-      b->next->prev = b->prev;
-      goto bget_find;
-    }
 
   release(&bcache.bucket[h].lock);
   acquire(&bcache.lock);
@@ -117,36 +106,38 @@ bget(uint dev, uint blockno)
 
   // Not cached.
   // Recycle the least recently used (LRU) unused buffer.
-  b = bcache.bucket[h].head.prev;
-  for(; b != &bcache.bucket[h].head; b = b->prev)
-    if(b->refcnt == 0)
-    {
-      release(&bcache.lock);
-      b->prev->next = b->next;
-      b->next->prev = b->prev;
-      goto bget_find;
-    }
-
-  for(h0 = 0; h0 < NBUF; ++h0) if(h0 != h)
+  for(h0 = 0; h0 < NBUCKET; ++h0)
   {
-    acquire(&bcache.bucket[h0].lock);
+    if(h0 != h)
+      acquire(&bcache.bucket[h0].lock);
     b = bcache.bucket[h0].head.prev;
     for(; b != &bcache.bucket[h0].head; b = b->prev)
+    {
       if(b->refcnt == 0)
       {
-        release(&bcache.lock);
-        b->prev->next = b->next;
-        b->next->prev = b->prev;
-        release(&bcache.bucket[h0].lock);
-        goto bget_find;
+        if(v == 0 || b->stamp < v->stamp)
+          v = b, hv = h0;
+        break;
       }
-    release(&bcache.bucket[h0].lock);
+    }
+    if(h0 != h)
+      release(&bcache.bucket[h0].lock);
   }
 
-  release(&bcache.lock);
-  panic("bget: no buffers");
+  if(v == 0)
+    panic("bget: no buffers");
+  h0 = hv;
+  b = v;
 
-bget_find:
+  if(h0 != h)
+    acquire(&bcache.bucket[h0].lock);
+  b->prev->next = b->next;
+  b->next->prev = b->prev;
+  if(h0 != h)
+    release(&bcache.bucket[h0].lock);
+
+  release(&bcache.lock);
+
   b->dev = dev;
   b->blockno = blockno;
   b->valid = 0;
