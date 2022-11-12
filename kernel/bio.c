@@ -23,6 +23,8 @@
 #include "fs.h"
 #include "buf.h"
 
+#include "proc.h"  // debug
+
 #define NBUCKET 17U
 
 static uint
@@ -97,7 +99,33 @@ bget(uint dev, uint blockno)
       goto bget_find;
     }
 
+  release(&bcache.bucket[h].lock);
   acquire(&bcache.lock);
+  acquire(&bcache.bucket[h].lock);
+
+  // Is the block already cached?
+  b = bcache.bucket[h].head.next;
+  for(; b != &bcache.bucket[h].head; b = b->next){
+    if(b->dev == dev && b->blockno == blockno){
+      release(&bcache.lock);
+      b->refcnt++;
+      release(&bcache.bucket[h].lock);
+      acquiresleep(&b->lock);
+      return b;
+    }
+  }
+
+  // Not cached.
+  // Recycle the least recently used (LRU) unused buffer.
+  b = bcache.bucket[h].head.prev;
+  for(; b != &bcache.bucket[h].head; b = b->prev)
+    if(b->refcnt == 0)
+    {
+      release(&bcache.lock);
+      b->prev->next = b->next;
+      b->next->prev = b->prev;
+      goto bget_find;
+    }
 
   for(h0 = 0; h0 < NBUF; ++h0) if(h0 != h)
   {
@@ -106,10 +134,10 @@ bget(uint dev, uint blockno)
     for(; b != &bcache.bucket[h0].head; b = b->prev)
       if(b->refcnt == 0)
       {
+        release(&bcache.lock);
         b->prev->next = b->next;
         b->next->prev = b->prev;
         release(&bcache.bucket[h0].lock);
-        release(&bcache.lock);
         goto bget_find;
       }
     release(&bcache.bucket[h0].lock);
