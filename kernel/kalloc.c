@@ -27,16 +27,17 @@ void
 kinit()
 {
   int i;
-  char buf[] = "kmem-??";
-  if(NCPU <= 0)
-    panic("kinit: invalid cpu number");
-  if(NCPU > 99)
-    panic("kinit: too many cpus");
+  // char buf[] = "kmem-??";
+  // if(NCPU <= 0)
+  //   panic("kinit: invalid cpu number");
+  // if(NCPU > 99)
+  //   panic("kinit: too many cpus");
   for(i = 0; i < NCPU; ++i)
   {
-    buf[5] = '0' + NCPU / 10;
-    buf[6] = '0' + NCPU % 10;
-    initlock(&kmem[i].lock, buf);
+    // buf[5] = '0' + NCPU / 10;
+    // buf[6] = '0' + NCPU % 10;
+    // initlock(&kmem[i].lock, buf);
+    initlock(&kmem[i].lock, "kmem");
   }
   freerange(end, (void*)PHYSTOP);
 }
