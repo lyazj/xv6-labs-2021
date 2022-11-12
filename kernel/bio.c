@@ -23,8 +23,6 @@
 #include "fs.h"
 #include "buf.h"
 
-#include "proc.h"  // debug
-
 #define NBUCKET 31U
 
 static uint
