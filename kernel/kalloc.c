@@ -93,6 +93,7 @@ kalloc(void)
 {
   struct run *r;
   int id;
+  int try;
 
   push_off();
   id = cpuid();
@@ -101,6 +102,16 @@ kalloc(void)
   if(r)
     kmem[id].freelist = r->next;
   release(&kmem[id].lock);
+  for(try = 1; r == 0 && try < NCPU; ++try)  /* try stealing... */
+  {
+    if(++id == NCPU)
+      id = 0;
+    acquire(&kmem[id].lock);
+    r = kmem[id].freelist;
+    if(r)
+      kmem[id].freelist = r->next;
+    release(&kmem[id].lock);
+  }
   pop_off();
 
   if(r)
