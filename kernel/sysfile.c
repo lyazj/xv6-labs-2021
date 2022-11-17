@@ -484,3 +484,27 @@ sys_pipe(void)
   }
   return 0;
 }
+
+// Target may not exist.
+// Existing link is an error.
+uint64
+sys_symlink(void)
+{
+  int n;
+  char target[MAXPATH];
+  char link[MAXPATH];
+  struct inode *ip;
+
+  if((n = argstr(0, target, MAXPATH)) < 0 || argstr(1, link, MAXPATH) < 0)
+    return -1;
+  begin_op();
+  if((ip = create(link, T_SYMLINK, 0, 0)) == 0)
+  {
+    end_op();
+    return -1;
+  }
+  n = -(writei(ip, 0, (uint64)target, 0, n) != n);
+  iunlockput(ip);
+  end_op();
+  return n;
+}
