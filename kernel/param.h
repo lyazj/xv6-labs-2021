@@ -23,5 +23,4 @@
 #endif
 #endif
 #define MAXPATH      128   // maximum file path name
-
-
+#define SYMBMAX      10  // max depth of symbolic links

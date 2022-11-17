@@ -290,7 +290,7 @@ sys_open(void)
   int fd, omode;
   struct file *f;
   struct inode *ip;
-  int n;
+  int n, depth = 0;
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
@@ -309,6 +309,27 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+    if((omode & O_NOFOLLOW) == 0){
+      while(depth < SYMBMAX && ip->type == T_SYMLINK){
+        ++depth;
+        if((n = readi(ip, 0, (uint64)path, 0, MAXPATH)) < 0){
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+        iunlock(ip);
+        if((ip = namei2(path, ip)) == 0){
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+      }
+      if(depth == SYMBMAX){
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+    }
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
