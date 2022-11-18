@@ -80,6 +80,15 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
+// Support memory mapped file
+struct vm_area {
+  uint64 vm_end;
+  uint64 vm_start;
+  int vm_prot;
+  int vm_flags;
+  struct file *vm_file;
+};
+
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -104,5 +113,6 @@ struct proc {
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  struct vm_area mmap[NMMAP];  // Memory mapped areas
   char name[16];               // Process name (debugging)
 };

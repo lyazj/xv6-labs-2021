@@ -501,8 +501,9 @@ sys_mmap(void)
 uint64
 sys_munmap(void)
 {
+  struct proc *p = myproc();
+
   uint64 addr = argraw(0);
   uint64 length = argraw(1);
-
-  return unmapfile(addr, length);
+  return unmapfile(p->pagetable, p->mmap, addr, length);
 }

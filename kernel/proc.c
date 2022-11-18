@@ -154,7 +154,7 @@ freeproc(struct proc *p)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
   if(p->pagetable)
-    proc_freepagetable(p->pagetable, p->sz);
+    proc_freepagetable(p->pagetable, p->sz, p->mmap);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -202,8 +202,17 @@ proc_pagetable(struct proc *p)
 // Free a process's page table, and free the
 // physical memory it refers to.
 void
-proc_freepagetable(pagetable_t pagetable, uint64 sz)
+proc_freepagetable(pagetable_t pagetable, uint64 sz, struct vm_area *mmap)
 {
+  struct vm_area *vmap;
+  uint64 addr;
+  if(mmap) for(vmap = mmap; vmap != &mmap[NMMAP]; ++vmap)
+    if(vmap->vm_end)
+    {
+      for(addr = vmap->vm_start; addr != vmap->vm_end; addr += PGSIZE)
+        unmapfilepage(pagetable, vmap, addr);
+      vmap->vm_end = 0;
+    }
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
@@ -288,6 +297,7 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+  mmapcopy(p->mmap, np->mmap);
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);

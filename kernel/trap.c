@@ -65,9 +65,34 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 13){
+    // page fault
+
+    if(p->killed)
+      exit(-1);
+
+    uint64 addr = r_stval();
+    struct vm_area *vmap;
+
+    // check if the faulting address is in an mmap area
+    for(vmap = p->mmap; vmap != &p->mmap[NMMAP]; ++vmap){
+      if(addr < vmap->vm_end && addr >= vmap->vm_start){  /* vmap->vm_end != 0 */
+        if(pageinfile(vmap, addr) < 0){
+          printf("%d: killed for mapped file paging in failure at %p\n",
+              p->pid, addr);
+          p->killed = 1;
+        }
+        break;
+      }
+    }
+
+    // not an mmap induced case
+    if(vmap == &p->mmap[NMMAP])
+      goto unexpected;
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
+unexpected:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

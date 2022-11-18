@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -437,11 +442,211 @@ uint64
 mapfile(uint64 addr, uint64 length,
     int prot, int flags, int fd, uint64 offset)
 {
-  return -1;  // TODO
+  struct proc *p;
+  struct file *file;
+  struct vm_area *vmap;
+
+  if(addr != 0)  /* not implemented */
+    return -1;
+
+  if(offset != 0)  /* not implemented */
+    return -1;
+
+  if(length > MMAPMAXSIZE)  /* too large size */
+    return -1;
+
+  if((prot & PROT_READ) == 0 && (prot & PROT_WRITE) == 0)
+    return -1;
+
+  if((flags & MAP_SHARED) == 0 && (flags & MAP_PRIVATE) == 0)
+    return -1;
+
+  if(fd < 0 || fd >= NOFILE)  /* fd out of range */
+    return -1;
+
+  p = myproc();
+  file = p->ofile[fd];
+  if(file == 0)  /* bad fd */
+    return -1;
+
+  /* file type validation */
+  if(file->type != FD_INODE)
+    return -1;
+
+  /* file permission validation */
+  if(file->readable == 0)
+    return -1;
+  if((flags & MAP_SHARED) && (prot & PROT_WRITE) && file->writable == 0)
+    return -1;
+
+  for(vmap = p->mmap; vmap != &p->mmap[NMMAP]; ++vmap)
+  {
+    if(vmap->vm_end == 0)  /* available */
+    {
+      vmap->vm_start = MMAPAREA(vmap - p->mmap);
+      vmap->vm_end = PGROUNDUP(vmap->vm_start + length);
+      vmap->vm_prot = prot;
+      vmap->vm_flags = flags;
+      vmap->vm_file = filedup(file);
+      return vmap->vm_start;
+    }
+  }
+  return -1;  /* too many mmaps */
 }
 
 int
-unmapfile(uint64 addr, size_t length)
+pageinfile(struct vm_area *vmap, uint64 addr)
 {
-  return -1;  // TODO
+  pte_t *pte = walk(myproc()->pagetable, PGROUNDDOWN(addr), 1);
+  uint64 offset = PGROUNDDOWN(addr) - vmap->vm_start;
+  struct inode *ip = vmap->vm_file->ip;
+  char *buf;
+  int e, r;
+
+  if(pte == 0)  /* run out of memory */
+    return -1;
+  if(*pte & PTE_V)  /* not a page-in case */
+    return -1;
+  if(vmap->vm_file->readable == 0)  /* file unreadable */
+    return -1;
+  if(offset >= ip->size)  /* offset out of range */
+    return -1;
+  if((buf = kalloc()) == 0)  /* run out of memory */
+    return -1;
+
+  /* compute expected number of bytes to read and read them */
+  if(ip->size - offset >= PGSIZE)
+    e = PGSIZE;
+  else
+    e = ip->size - offset;
+  ilock(ip);
+  r = readi(ip, 0, (uint64)buf, offset, e);
+  iunlock(ip);
+  if(r != e)  /* file read error */
+  {
+    kfree(buf);
+    return -1;
+  }
+  if(e != PGSIZE)
+    memset(&buf[e], 0, PGSIZE - e);
+
+  /* install page mapping */
+  *pte = PTE_V | PTE_U | PA2PTE(buf);
+  if(vmap->vm_prot & PROT_READ)
+    *pte |= PTE_R;
+  if(vmap->vm_prot & PROT_WRITE)
+    *pte |= PTE_W;
+  return 0;
+}
+
+void
+unmapfilepage(pagetable_t pagetable, struct vm_area *vmap, uint64 addr)
+{
+  pte_t *pte = walk(pagetable, PGROUNDDOWN(addr), 0);
+  struct inode *ip;
+  uint64 offset;
+  int e, r;
+
+  if(pte == 0 || (*pte & PTE_V) == 0)  /* not exactly mapped */
+    return;
+  if((vmap->vm_flags & MAP_SHARED) && (*pte & PTE_D))  /* write back */
+  {
+    ip = vmap->vm_file->ip;
+    offset = addr - vmap->vm_start;
+    e = ip->size - offset;
+    if(e > PGSIZE)
+      e = PGSIZE;
+
+    begin_op();
+    ilock(ip);
+    r = writei(ip, 1, addr, offset, e);
+    iunlock(ip);
+    end_op();
+
+    if(r != e)
+      panic("unmapfilepage: writei");
+  }
+  kfree((void *)PTE2PA(*pte));
+  *pte = 0;
+}
+
+int
+unmapfile(pagetable_t pagetable, struct vm_area *mmap,
+    uint64 addr, uint64 length)
+{
+  struct vm_area *vmap;
+
+  if(addr != PGROUNDDOWN(addr))  /* addr not aligned */
+    return -1;
+
+  /* adjust addr and length to the range of mmap */
+  if(addr >= MMAPEND)  /* addr out of range */
+    return 0;
+  if(addr < MMAPSTART)  /* addr out of range */
+  {
+    if(length <= MMAPSTART - addr)
+      return 0;
+    length -= MMAPSTART - addr;
+    addr = MMAPSTART;
+  }
+  if(length > MMAPEND - addr)  /* length out of range */
+    length = MMAPEND - addr;
+  else
+    length = PGROUNDUP(length);
+
+again:
+  for(vmap = mmap; vmap != &mmap[NMMAP]; ++vmap)
+  {
+    if(addr < vmap->vm_end && addr >= vmap->vm_start)  /* vmap->vm_end != 0 */
+    {
+      if(addr == vmap->vm_start)  /* strip at the very beginning... */
+      {
+        while(length && addr != vmap->vm_end)
+        {
+          unmapfilepage(pagetable, vmap, addr);
+          length -= PGSIZE;
+          addr += PGSIZE;
+        }
+        if(addr == vmap->vm_end)  /* empty area */
+        {
+          vmap->vm_end = 0;
+          fileclose(vmap->vm_file);
+          if(length)
+            goto again;
+        }
+        else  /* length == 0 */
+          vmap->vm_start = addr;
+      }
+      else if((addr + length) == vmap->vm_end)  /* ... or at the very end */
+      {
+        while(vmap->vm_end != addr)
+        {
+          vmap->vm_end -= PGSIZE;
+          unmapfilepage(pagetable, vmap, addr);
+        }
+        if(addr == vmap->vm_start)  /* empty area */
+        {
+          vmap->vm_end = 0;
+          fileclose(vmap->vm_file);
+        }
+      }
+      else  /* not implemented */
+        return -1;  /* not implemented */
+      break;
+    }
+  }
+  return 0;
+}
+
+void
+mmapcopy(struct vm_area *old, struct vm_area *new)
+{
+  int i;
+
+  for(i = 0; i < NMMAP; ++i)
+    if(old[i].vm_end)
+    {
+      filedup(old[i].vm_file);
+      new[i] = old[i];
+    }
 }

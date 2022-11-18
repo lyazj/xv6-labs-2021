@@ -8,6 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct vm_area;
 
 // bio.c
 void            binit(void);
@@ -88,7 +89,7 @@ int             fork(void);
 int             growproc(int);
 void            proc_mapstacks(pagetable_t);
 pagetable_t     proc_pagetable(struct proc *);
-void            proc_freepagetable(pagetable_t, uint64);
+void            proc_freepagetable(pagetable_t, uint64, struct vm_area *);
 int             kill(int);
 struct cpu*     mycpu(void);
 struct cpu*     getmycpu(void);
@@ -172,7 +173,10 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 uint64          mapfile(uint64, uint64, int, int, int, uint64);
-int             unmapfile(uint64, uint64);
+void            unmapfilepage(pagetable_t, struct vm_area *, uint64);
+int             unmapfile(pagetable_t, struct vm_area *, uint64, uint64);
+int             pageinfile(struct vm_area *, uint64);
+void            mmapcopy(struct vm_area *, struct vm_area *);
 
 // plic.c
 void            plicinit(void);

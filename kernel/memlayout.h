@@ -62,6 +62,11 @@
 //   fixed-size stack
 //   expandable heap
 //   ...
+//   memory mapped areas
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+#define MMAPEND (TRAPFRAME - PGSIZE)
+#define MMAPMAXSIZE (PGROUNDUP(MAXFILE * BSIZE))
+#define MMAPAREA(i) (MMAPEND - ((i) + 1) * MMAPMAXSIZE)
+#define MMAPSTART (MMAPAREA(NMMAP - 1))
