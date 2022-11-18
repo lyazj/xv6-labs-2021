@@ -199,10 +199,6 @@ proc_pagetable(struct proc *p)
   return pagetable;
 }
 
-#include "fs.h"  // DEBUG
-#include "sleeplock.h"  // DEBUG
-#include "file.h"  // DEBUG
-
 // Free a process's page table, and free the
 // physical memory it refers to.
 void
