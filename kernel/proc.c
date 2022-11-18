@@ -154,7 +154,7 @@ freeproc(struct proc *p)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
   if(p->pagetable)
-    proc_freepagetable(p->pagetable, p->sz, p->mmap);
+    proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -199,20 +199,15 @@ proc_pagetable(struct proc *p)
   return pagetable;
 }
 
+#include "fs.h"  // DEBUG
+#include "sleeplock.h"  // DEBUG
+#include "file.h"  // DEBUG
+
 // Free a process's page table, and free the
 // physical memory it refers to.
 void
-proc_freepagetable(pagetable_t pagetable, uint64 sz, struct vm_area *mmap)
+proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
-  struct vm_area *vmap;
-  uint64 addr;
-  if(mmap) for(vmap = mmap; vmap != &mmap[NMMAP]; ++vmap)
-    if(vmap->vm_end)
-    {
-      for(addr = vmap->vm_start; addr != vmap->vm_end; addr += PGSIZE)
-        unmapfilepage(pagetable, vmap, addr);
-      vmap->vm_end = 0;
-    }
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
@@ -350,9 +345,21 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
+  struct vm_area *vmap;
+  uint64 addr;
 
   if(p == initproc)
     panic("init exiting");
+
+  // Unmap all mapped files.
+  for(vmap = p->mmap; vmap != &p->mmap[NMMAP]; ++vmap)
+    if(vmap->vm_end)
+    {
+      for(addr = vmap->vm_start; addr != vmap->vm_end; addr += PGSIZE)
+        unmapfilepage(p->pagetable, vmap, addr);
+      vmap->vm_end = 0;
+      fileclose(vmap->vm_file);
+    }
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){

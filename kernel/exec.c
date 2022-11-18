@@ -20,6 +20,8 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
+  struct vm_area *vmap;
+  uint64 addr;
 
   begin_op();
 
@@ -114,13 +116,23 @@ exec(char *path, char **argv)
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz, p->mmap);
+  proc_freepagetable(oldpagetable, oldsz);
+
+  // Unmap previous mapped files.
+  for(vmap = p->mmap; vmap != &p->mmap[NMMAP]; ++vmap)
+    if(vmap->vm_end)
+    {
+      for(addr = vmap->vm_start; addr != vmap->vm_end; addr += PGSIZE)
+        unmapfilepage(p->pagetable, vmap, addr);
+      vmap->vm_end = 0;
+      fileclose(vmap->vm_file);
+    }
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
   if(pagetable)
-    proc_freepagetable(pagetable, sz, 0);
+    proc_freepagetable(pagetable, sz);
   if(ip){
     iunlockput(ip);
     end_op();
