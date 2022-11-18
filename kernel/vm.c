@@ -432,3 +432,16 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+uint64
+mapfile(uint64 addr, uint64 length,
+    int prot, int flags, int fd, uint64 offset)
+{
+  return -1;  // TODO
+}
+
+int
+unmapfile(uint64 addr, size_t length)
+{
+  return -1;  // TODO
+}

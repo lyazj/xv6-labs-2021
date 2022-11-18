@@ -484,3 +484,25 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr = argraw(0);
+  uint64 length = argraw(1);
+  int prot = argraw(2);
+  int flags = argraw(3);
+  int fd = argraw(4);
+  uint64 offset = argraw(5);
+
+  return mapfile(addr, length, prot, flags, fd, offset);
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr = argraw(0);
+  uint64 length = argraw(1);
+
+  return unmapfile(addr, length);
+}

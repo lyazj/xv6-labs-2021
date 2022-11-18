@@ -132,6 +132,7 @@ int             strncmp(const char*, const char*, uint);
 char*           strncpy(char*, const char*, int);
 
 // syscall.c
+uint64          argraw(int);
 int             argint(int, int*);
 int             argstr(int, char*, int);
 int             argaddr(int, uint64 *);
@@ -170,6 +171,8 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+uint64          mapfile(uint64, uint64, int, int, int, uint64);
+int             unmapfile(uint64, uint64);
 
 // plic.c
 void            plicinit(void);
