@@ -133,6 +133,7 @@ UPROGS=\
 	$U/_wc\
 	$U/_zombie\
 	$U/_test_kill\
+	$U/_con_write\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
