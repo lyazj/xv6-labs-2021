@@ -102,7 +102,43 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
+  //printf("*** %s: head=%p len=%d\n", __func__, m->head, m->len);
+
+  acquire(&e1000_lock);
   
+  // Get transmit descriptor tail.
+  uint32 tdt = regs[E1000_TDT];
+  //printf("*** %s: tdt=%d\n", __func__, tdt);
+
+  // Ensure a valid status.
+  //printf("*** %s: status=%d\n", __func__, tx_ring[tdt].status);
+  if(!(tx_ring[tdt].status & E1000_TXD_STAT_DD)) {
+    release(&e1000_lock);
+    return -1;
+  }
+
+  // Clean up on demand.
+  //printf("*** %s: mbuf=%p\n", __func__, tx_mbufs[tdt]);
+  if(tx_mbufs[tdt]) {
+    mbuffree(tx_mbufs[tdt]);
+    tx_mbufs[tdt] = 0;
+  }
+
+  // Fill transmit descriptor.
+  tx_ring[tdt].addr = (uint64)m->head;
+  tx_ring[tdt].length = m->len;
+  tx_ring[tdt].cso = 0;  // [E1000 3.3.3] future compatibility
+  tx_ring[tdt].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+  tx_ring[tdt].status = 0;
+  tx_ring[tdt].css = 0;
+  tx_ring[tdt].special = 0;
+
+  // Append the filled descriptor to the ring.
+  regs[E1000_TDT] = (tdt + 1) % TX_RING_SIZE;
+
+  release(&e1000_lock);
+
+  //printf("*** %s: success\n", __func__);
   return 0;
 }
 
@@ -112,9 +148,53 @@ e1000_recv(void)
   //
   // Your code here.
   //
-  // Check for packets that have arrived from the e1000
+  // Check for packets that have arrived from the e1000.
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  //printf("*** %s\n", __func__);
+
+  // Allocate a new buffer for substitution.
+  struct mbuf *rbuf = mbufalloc(0);
+  if(!rbuf) panic("mbufalloc");
+
+  acquire(&e1000_lock);
+
+  // Get receive descriptor head.
+  uint32 rdt = regs[E1000_RDT];
+  //printf("*** %s: rdt=%d\n", __func__, rdt);
+  rdt = (rdt + 1) % TX_RING_SIZE;
+
+  // Ensure a valid status.
+  //printf("*** %s: status=%d\n", __func__, rx_ring[rdt].status);
+  if(!(rx_ring[rdt].status & E1000_RXD_STAT_DD)) {
+    release(&e1000_lock);
+    mbuffree(rbuf);
+    return;
+  }
+
+  // Update received length in receive buffer.
+  rx_mbufs[rdt]->len = rx_ring[rdt].length;
+
+  // Replace receive buffer and reset descriptor status.
+  {
+    struct mbuf *old_rbuf = rx_mbufs[rdt];
+    rx_mbufs[rdt] = rbuf;
+    rx_ring[rdt].addr = (uint64)rbuf->head;
+    rx_ring[rdt].status = 0;
+    rbuf = old_rbuf;
+  }
+
+  // Remove the addressed descriptor from the ring.
+  regs[E1000_RDT] = rdt;
+
+  release(&e1000_lock);
+
+  // Deliver received data to the network layer.
+  net_rx(rbuf);
+  //printf("*** %s: success\n", __func__);
+
+  // Greedily address all arrived packets.
+  e1000_recv();
 }
 
 void
